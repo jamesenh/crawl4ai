@@ -145,15 +145,18 @@ class LocalSeleniumCrawlerStrategy(CrawlerStrategy):
         # self.driver = webdriver.Chrome(service=self.service, options=self.options)
         
         # Use selenium-manager (built into Selenium 4.10.0+)
-        self.service = Service()
-        self.driver = webdriver.Chrome(options=self.options)
+        executable_path = "/Users/jamesenh/python/drivers/chromedriver-mac-arm64/chromedriver"
+        print(f"[LOG] ⚙️ Using chromedriver at {executable_path}")
+        self.service = Service(executable_path=executable_path)
+        self.driver = webdriver.Chrome(options=self.options, service=self.service)
         
         self.driver = self.execute_hook('on_driver_created', self.driver)
         
         if kwargs.get("cookies"):
             for cookie in kwargs.get("cookies"):
                 self.driver.add_cookie(cookie)
-            
+        
+        print(f"[LOG] 🚀 Initialize LocalSeleniumCrawlerStrategy successfully")    
         
 
     def set_hook(self, hook_type: str, hook: Callable):

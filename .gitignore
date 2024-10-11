@@ -201,3 +201,5 @@ test_env/
 todo.md
 git_changes.py
 git_changes.md
+test/
+*private*

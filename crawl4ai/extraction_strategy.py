@@ -58,7 +58,8 @@ class NoExtractionStrategy(ExtractionStrategy):
 class LLMExtractionStrategy(ExtractionStrategy):
     def __init__(self, 
                  provider: str = DEFAULT_PROVIDER, api_token: Optional[str] = None, 
-                 instruction:str = None, schema:Dict = None, extraction_type = "block", **kwargs):
+                 instruction:str = None, schema:Dict = None, extraction_type = "block",
+                 post_process=False, **kwargs):
         """
         Initialize the strategy with clustering parameters.
 
@@ -72,6 +73,7 @@ class LLMExtractionStrategy(ExtractionStrategy):
         self.instruction = instruction
         self.extract_type = extraction_type
         self.schema = schema
+        self.post_process = post_process
         if schema:
             self.extract_type = "schema"
         
@@ -179,7 +181,7 @@ class LLMExtractionStrategy(ExtractionStrategy):
         return sections
 
 
-    def run(self, url: str, sections: List[str]) -> List[Dict[str, Any]]:
+    def run(self, url: str, sections: List[str], links_internal=[]) -> List[Dict[str, Any]]:
         """
         Process sections sequentially with a delay for rate limiting issues, specifically for LLMExtractionStrategy.
         """
@@ -219,8 +221,67 @@ class LLMExtractionStrategy(ExtractionStrategy):
                             "content": str(e)
                         })
 
+        if self.post_process and links_internal: # 启用后续关联url处理且提供内部链接列表
+            extracted_content = self.refind_data_url_relation(
+                url, 
+                extracted_content, 
+                links_internal, 
+                provider=self.provider, 
+                api_token=self.api_token, 
+                base_url=self.base_url
+            )
         
-        return extracted_content        
+        return extracted_content
+
+    def refind_data_url_relation(self, url, result, links_internal, provider = DEFAULT_PROVIDER, api_token = None, base_url=None):
+        """
+        重新使用llm将数据url与内部链接关联起来
+        """
+        from urllib.parse import urlparse, urljoin
+        url_base = urlparse(url)
+        api_token = PROVIDER_MODELS.get(provider, None) if not api_token else api_token
+
+        links = []
+        for link in links_internal:
+            if link['href'].startswith('http'): # 外部链接不处理
+                continue
+            links.append({
+                "url": urljoin(f"{url_base.scheme}://{url_base.netloc}", link['href']),
+                "text": link['text'].strip("\t\n\r ")
+            })
+
+        variable_values = {
+            "RESULT": result,
+            "LINKS": links,
+        }
+        
+        prompt_with_variables = PROMPT_EXTRACT_REFIND_RELATION_WITH_INSTRUCTION
+        for variable in variable_values:
+            prompt_with_variables = prompt_with_variables.replace(
+                "{" + variable + "}", json.dumps(variable_values[variable])
+            )
+        
+        # 先使用同步的方式处理
+        response = perform_completion_with_backoff(provider, prompt_with_variables, api_token, base_url=base_url)
+            
+        try:
+            blocks = extract_xml_data(["blocks"], response.choices[0].message.content)['blocks']
+            blocks = json.loads(blocks)
+            ## Add error: False to the blocks
+            for block in blocks:
+                block['error'] = False
+        except Exception as e:
+            parsed, unparsed = split_and_parse_json_objects(response.choices[0].message.content)
+            blocks = parsed
+            # Append all unparsed segments as onr error block and content is list of unparsed segments
+            if unparsed:
+                blocks.append({
+                    "index": 0,
+                    "error": True,
+                    "tags": ["error"],
+                    "content": unparsed
+                })
+        return blocks  
   
 class CosineStrategy(ExtractionStrategy):
     def __init__(self, semantic_filter = None, word_count_threshold=10, max_dist=0.2, linkage_method='ward', top_k=3, model_name = 'sentence-transformers/all-MiniLM-L6-v2', sim_threshold = 0.3, **kwargs):

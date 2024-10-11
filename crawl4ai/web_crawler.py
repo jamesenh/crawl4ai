@@ -200,7 +200,7 @@ class WebCrawler:
                     print(f"[LOG] 🔥 Extracting semantic blocks for {url}, Strategy: {extraction_strategy.name}")
 
                 sections = chunking_strategy.chunk(markdown)
-                extracted_content = extraction_strategy.run(url, sections)
+                extracted_content = extraction_strategy.run(url, sections, links_internal=links['internal'] if isinstance(extraction_strategy, LLMExtractionStrategy) and extraction_strategy.post_process else [])
                 extracted_content = json.dumps(extracted_content, indent=4, default=str, ensure_ascii=False)
 
                 if verbose:
