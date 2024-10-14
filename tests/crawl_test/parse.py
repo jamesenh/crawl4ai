@@ -1,6 +1,7 @@
 import sys
+import asyncio
 sys.path.append('/Users/jamesenh/projects/github/crawl4ai')
-from crawl4ai.web_crawler import WebCrawler
+from crawl4ai.async_webcrawler import AsyncWebCrawler
 from crawl4ai.extraction_strategy import LLMExtractionStrategy
 from pydantic import BaseModel, Field
 from typing import Union
@@ -53,32 +54,39 @@ class Item(BaseModel):
     info_type: str = Field(..., description="Type of information extracted, such as doctor, hospital, or department.")
     item: Union[Doctor, Hospital, Department] = Field(..., description="Doctor or hospital information extracted.")
 
-url = "https://y.dxy.cn/hospital/?page=1"
+async def process_result(result):
+    # 解析结果
+    res = json.loads(result.extracted_content)
+    with open('test/data/result.json', 'a', encoding='utf-8') as f:
+        json.dump(res, f, ensure_ascii=False, indent=4)
+        f.write('\n')  # 添加换行符以分隔多个结果
 
-crawler = WebCrawler(verbose=True)
+    with open('test/data/links_internal.json', 'a', encoding='utf-8') as f:
+        json.dump(result.links.get("internal", []), f, ensure_ascii=False, indent=4)
+        f.write('\n')
 
-result = crawler.run(
-    url, 
-    warmup=False, 
-    bypass_cache=True,
-    extraction_strategy=LLMExtractionStrategy(
-        provider="openai/LinkAI-4o-mini",
-        base_url="***",
-        api_token="***",
-        schema=Item.model_json_schema(),
-        extraction_type="schema",
-        instruction="从抓取的内容中提取跟医生、医院、科室相关的信息,如果必填字段没有提取到则填空字符，信息描述尽量使用中文",
-        post_process=True
-    )
-)
+    with open('test/data/links_external.json', 'a', encoding='utf-8') as f:
+        json.dump(result.links.get("external", []), f, ensure_ascii=False, indent=4)
+        f.write('\n')
 
-# 解析结果
-res = json.loads(result.extracted_content)
-with open('test/data/result.json', 'w', encoding='utf-8') as f:
-    json.dump(res, f, ensure_ascii=False, indent=4)
+async def main():
+    crawler = AsyncWebCrawler(verbose=True)
+    async for result in crawler.recursive_crawl(
+        "https://y.dxy.cn/hospital/?page=1",
+        max_depth=3,
+        warmup=False,
+        bypass_cache=True,
+        extraction_strategy=LLMExtractionStrategy(
+            provider="openai/LinkAI-4o-mini",
+            base_url="***",
+            api_token="***",
+            schema=Item.model_json_schema(),
+            extraction_type="schema",
+            instruction="从抓取的内容中提取跟医生、医院、科室相关的信息,如果必填字段没有提取到则填空字符，信息描述尽量使用中文",
+            post_process=True
+        )
+    ):
+        await process_result(result)
 
-with open('test/data/links_internal.json', 'w', encoding='utf-8') as f:
-    json.dump(result.links.get("internal", []), f, ensure_ascii=False, indent=4)
-
-with open('test/data/links_external.json', 'w', encoding='utf-8') as f:
-    json.dump(result.links.get("external", []), f, ensure_ascii=False, indent=4)
+if __name__ == "__main__":
+    asyncio.run(main())
